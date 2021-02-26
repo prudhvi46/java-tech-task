@@ -1,13 +1,22 @@
 package com.rezdy.lunch.service;
 
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Service;
-
-import javax.persistence.EntityManager;
-import javax.persistence.criteria.*;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.stream.Collectors;
+
+import javax.persistence.EntityManager;
+import javax.persistence.criteria.CriteriaBuilder;
+import javax.persistence.criteria.CriteriaQuery;
+import javax.persistence.criteria.Root;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+
+import com.rezdy.lunch.entity.Recipe;
+import com.rezdy.lunch.helper.LunchServiceHelper;
+import com.rezdy.lunch.entity.Ingredient;
 
 @Service
 public class LunchService {
@@ -20,32 +29,62 @@ public class LunchService {
     public List<Recipe> getNonExpiredRecipesOnDate(LocalDate date) {
         List<Recipe> recipes = loadRecipes(date);
 
-        sortRecipes(recipes);
+        sortRecipes(recipes,date);
 
         return recipesSorted;
     }
 
-    private void sortRecipes(List<Recipe> recipes) {
-        recipesSorted = recipes; //TODO sort recipes considering best-before
+    private List<Recipe> sortRecipes(List<Recipe> recipes, final LocalDate date) {
+        List<Recipe> recipesSorted = new ArrayList<>();
+        if (recipes != null) {
+            recipesSorted.addAll(recipes);
+            recipesSorted.sort((o1, o2) -> compareBestBeforeDates(date, o1, o2));
+        }
+        return recipesSorted;
     }
 
-    public List<Recipe> loadRecipes(LocalDate date) {
+    private int compareBestBeforeDates(LocalDate date, Recipe o1, Recipe o2) {
+        Optional<LocalDate> expireBestBefore = getOldestPastBestBeforeDateFromRecipeIngredients(date, o1);
+        Optional<LocalDate> expireBestbefore2 = getOldestPastBestBeforeDateFromRecipeIngredients(date, o2);
+        // recipes with an ingredient past its "best before" at the bottom at the list, sorted by
+        // "best before" desc, recipe title asc
+        if (expireBestBefore.isPresent() && expireBestbefore2.isEmpty()) {
+            return 1;
+        } else if (expireBestBefore.isEmpty() && expireBestbefore2.isPresent()) {
+            return -1;
+        } else if (expireBestBefore.isPresent() && expireBestbefore2.isPresent()) {
+            int dateComparison = expireBestBefore.get().compareTo(expireBestbefore2.get());
+            if (dateComparison != 0) return dateComparison;
+        }
+        return o1.getTitle().compareTo(o2.getTitle());
+    }
+
+    private Optional<LocalDate> getOldestPastBestBeforeDateFromRecipeIngredients(LocalDate date, Recipe o1) {
+        return o1.getIngredients().stream()
+                .map(Ingredient::getBestBefore)
+                .filter(bestBefore -> date.isAfter(bestBefore))
+                .min(LocalDate::compareTo);
+    }
+    public List<Recipe> loadRecipes(LocalDate date)
+    {
+
         CriteriaBuilder cb = entityManager.getCriteriaBuilder();
-        CriteriaQuery<Recipe> criteriaQuery = cb.createQuery(Recipe.class);
-        Root<Recipe> recipeRoot = criteriaQuery.from(Recipe.class);
+        List<Recipe> recipeList = null;
+        if (cb != null)
+        {
+            CriteriaQuery<Recipe> criteriaQuery = cb.createQuery(Recipe.class);
+            Root<Recipe> recipeRoot = criteriaQuery.from(Recipe.class);
+            CriteriaQuery<Recipe> query = criteriaQuery.select(recipeRoot);
+            recipeList = entityManager.createQuery(query).getResultList();
+        }
 
-        CriteriaQuery<Recipe> query = criteriaQuery.select(recipeRoot);
+        System.out.println("recipeList :: " + recipeList);
 
-        Subquery<Recipe> nonExpiredIngredientSubquery = query.subquery(Recipe.class);
-        Root<Recipe> nonExpiredIngredient = nonExpiredIngredientSubquery.from(Recipe.class);
-        nonExpiredIngredientSubquery.select(nonExpiredIngredient);
+        recipeList.forEach(recipe -> System.out.println("Recipe Title ::: " + recipe));
 
-        Predicate matchingRecipe = cb.equal(nonExpiredIngredient.get("title"), recipeRoot.get("title"));
-        Predicate expiredIngredient = cb.lessThan(nonExpiredIngredient.join("ingredients").get("useBy"), date);
+        List<Recipe> validRecipes = recipeList.stream().filter(recipe -> !LunchServiceHelper.isExpired(recipe, date))
+                .collect(Collectors.toList());
+        return validRecipes;
 
-        Predicate allNonExpiredIngredients = cb.exists(nonExpiredIngredientSubquery.where(matchingRecipe, expiredIngredient));
-
-        return entityManager.createQuery(query.where(allNonExpiredIngredients)).getResultList();
     }
-
 }

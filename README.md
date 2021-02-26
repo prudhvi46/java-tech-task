@@ -34,3 +34,13 @@ The service provides an endpoint that will determine, from a set of recipes, wha
     ```
     
 3. Run Springboot LunchApplication
+
+
+
+1. Moved db access logic to RecipeRepository
+2. Added LunchService interface which is implemented by LunchServiceImpl
+3. Added error handling code 
+4. Added unit tests to check Lunch api
+5. Extended /lunch/recipes exclusion of ingredients functionality to also has an inclusion option where recipes that contain specified ingredients will be returned - Prudhvi
+
+
